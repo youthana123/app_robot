@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Cute Robot 🤖</title>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #faf4f4;       /* พื้นหลังสีครีมพาสเทล */
+            --text-color: #5c4d4d;     /* สีตัวอักษรสีน้ำตาลตุ่นๆ */
+            --card-bg: #ffffff;        /* สีพื้นหลังการ์ด */
+            --btn-blue: #a3c9e2;       /* สีปุ่มทิศทาง (ฟ้าพาสเทล) */
+            --btn-red: #ffb6b9;        /* สีปุ่มหยุด/อัด (แดงพาสเทล) */
+            --btn-orange: #ffe0b2;     /* สีปุ่มไมค์ (ส้มพาสเทล) */
+            --success: #a8e6cf;        /* สีสถานะออนไลน์ (เขียวพาสเทล) */
+            --danger: #ffaaa5;         /* สีสถานะออฟไลน์ (ชมพูอมแดง) */
+        }
+
+        body { 
+            background: var(--bg-color); 
+            color: var(--text-color); 
+            font-family: 'Kanit', sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            text-align: center; 
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px; /* จำกัดความกว้างบน PC ให้ดูพอดี */
+        }
+
+        h2 { 
+            color: #ff8b94; 
+            font-weight: 600; 
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        /* Dashboard Layout */
+        .status-bar { 
+            display: flex; 
+            justify-content: center; 
+            flex-wrap: wrap; 
+            gap: 10px; 
+            margin-bottom: 20px; 
+        }
+        .badge { 
+            background: var(--card-bg); 
+            padding: 8px 16px; 
+            border-radius: 20px; /* ขอบโค้งมน */
+            font-size: 14px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+            border: 1px solid #f0e6e6;
+        }
+
+        /* Video Container */
+        .video-wrapper {
+            position: relative; 
+            width: 100%;
+            border-radius: 20px; 
+            overflow: hidden;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.06); 
+            background: #fff;
+            border: 4px solid #fff;
+            margin-bottom: 25px;
+        }
+        img { width: 100%; display: block; object-fit: cover; }
+        
+        .hud-overlay {
+            position: absolute; 
+            top: 15px; 
+            right: 15px; 
+            background: rgba(255, 255, 255, 0.9); 
+            padding: 5px 12px; 
+            border-radius: 15px; 
+            color: #ff5e62; 
+            font-weight: bold;
+            font-size: 12px;
+            display: none; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        /* D-Pad Controls (แป้นควบคุมแบบตาราง) */
+        .d-pad { 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 12px; 
+            max-width: 280px; 
+            margin: 0 auto 30px auto; 
+        }
+        .btn-ctrl { 
+            background: var(--btn-blue); 
+            color: #fff;
+            border: none; 
+            padding: 20px 0; 
+            border-radius: 18px; 
+            font-size: 16px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            box-shadow: 0 4px 0 #8ab4d1; 
+            transition: all 0.1s; 
+            font-family: inherit;
+        }
+        .btn-ctrl:active { 
+            transform: translateY(4px); 
+            box-shadow: 0 0 0 #8ab4d1; 
+        }
+        .btn-stop { background: var(--btn-red); box-shadow: 0 4px 0 #e6a2a5; }
+        .btn-stop:active { box-shadow: 0 0 0 #e6a2a5; }
+
+        .up { grid-column: 2; }
+        .left { grid-column: 1; grid-row: 2; }
+        .stop { grid-column: 2; grid-row: 2; }
+        .right { grid-column: 3; grid-row: 2; }
+        .down { grid-column: 2; grid-row: 3; }
+
+        /* Action Buttons */
+        .action-panel { 
+            display: flex; 
+            flex-direction: column; /* เรียงแนวตั้งบนมือถือ */
+            gap: 15px; 
+            width: 100%;
+        }
+        .btn-action { 
+            padding: 16px; 
+            border-radius: 25px; 
+            border: none; 
+            font-size: 16px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05); 
+            transition: 0.2s; 
+            font-family: inherit;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-mic { background: var(--btn-orange); color: #d68a20; }
+        .btn-record { background: #e0f2f1; color: #00897b; }
+        .btn-record.recording { background: #ffebee; color: #c62828; animation: pulse 1.5s infinite; }
+
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+        .online { background: var(--success); }
+        .offline { background: var(--danger); }
+        
+        canvas { display: none; }
+
+        /* ปรับแต่งสำหรับหน้าจอที่ใหญ่ขึ้น (PC/Tablet) */
+        @media (min-width: 480px) {
+            .action-panel { flex-direction: row; justify-content: center; }
+            .btn-action { width: 220px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>น้องหุ่นยนต์ 🤖✨</h2>
+        
+        <div class="status-bar">
+            <div class="badge"><span id="cloud-dot" class="status-dot offline"></span>Cloud</div>
+            <div class="badge"><span id="robot-dot" class="status-dot offline"></span>Robot</div>
+            <div class="badge" style="color: #8ab4d1;">🕹️ <span id="cmd-status">พักเครื่อง</span></div>
+        </div>
+
+        <div class="video-wrapper">
+            <div id="rec-indicator" class="hud-overlay">🔴 กำลังบันทึก...</div>
+            <img id="video-stream" alt="💤 รอสัญญาณภาพจากหุ่นยนต์...">
+        </div>
+        
+        <canvas id="record-canvas"></canvas>
+
+        <div class="d-pad">
+            <button class="btn-ctrl up" onmousedown="sendCmd('F', 'เดินหน้า')" onmouseup="sendCmd('S', 'พักเครื่อง')" ontouchstart="sendCmd('F', 'เดินหน้า')" ontouchend="sendCmd('S', 'พักเครื่อง')">ขึ้น</button>
+            
+            <button class="btn-ctrl left" onmousedown="sendCmd('L', 'เลี้ยวซ้าย')" onmouseup="sendCmd('S', 'พักเครื่อง')" ontouchstart="sendCmd('L', 'เลี้ยวซ้าย')" ontouchend="sendCmd('S', 'พักเครื่อง')">ซ้าย</button>
+            <button class="btn-ctrl btn-stop stop" onmousedown="sendCmd('S', 'หยุด')" ontouchstart="sendCmd('S', 'หยุด')">หยุด</button>
+            <button class="btn-ctrl right" onmousedown="sendCmd('R', 'เลี้ยวขวา')" onmouseup="sendCmd('S', 'พักเครื่อง')" ontouchstart="sendCmd('R', 'เลี้ยวขวา')" ontouchend="sendCmd('S', 'พักเครื่อง')">ขวา</button>
+            
+            <button class="btn-ctrl down" onmousedown="sendCmd('B', 'ถอยหลัง')" onmouseup="sendCmd('S', 'พักเครื่อง')" ontouchstart="sendCmd('B', 'ถอยหลัง')" ontouchend="sendCmd('S', 'พักเครื่อง')">ลง</button>
+        </div>
+
+        <div class="action-panel">
+            <button id="mic-btn" class="btn-action btn-mic">
+                🎙️ กดค้างเพื่อพูด
+            </button>
+            <button id="record-btn" class="btn-action btn-record">
+                📹 เริ่มบันทึกวิดีโอ
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ ลิงก์ Render ของคุณ
+        const WS_URL = 'wss://robot-relay-67r7.onrender.com'; 
+        const ws = new WebSocket(WS_URL);
+        ws.binaryType = 'arraybuffer';
+
+        const cloudDot = document.getElementById('cloud-dot');
+        const robotDot = document.getElementById('robot-dot');
+        const cmdStatus = document.getElementById('cmd-status');
+        const img = document.getElementById('video-stream');
+        
+        let robotTimeout;
+        let audioContextOut = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+
+        // --- ระบบอัดวิดีโอ (Client-Side Recording) ---
+        const recordBtn = document.getElementById('record-btn');
+        const recIndicator = document.getElementById('rec-indicator');
+        const canvas = document.getElementById('record-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let mediaRecorder;
+        let recordedChunks = [];
+        let isRecording = false;
+
+        recordBtn.onclick = () => {
+            if (!isRecording) startRecording();
+            else stopRecording();
+        };
+
+        function startRecording() {
+            recordedChunks = [];
+            canvas.width = img.width || 640;
+            canvas.height = img.height || 480;
+            
+            const canvasStream = canvas.captureStream(20); // 20 FPS
+            
+            try {
+                mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm' });
+            } catch (e) {
+                mediaRecorder = new MediaRecorder(canvasStream);
+            }
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `MyRobot_Video_${new Date().getTime()}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            mediaRecorder.start();
+            isRecording = true;
+            recordBtn.innerHTML = "⏹️ หยุดบันทึก";
+            recordBtn.classList.add('recording');
+            recIndicator.style.display = 'block';
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            isRecording = false;
+            recordBtn.innerHTML = "📹 เริ่มบันทึกวิดีโอ";
+            recordBtn.classList.remove('recording');
+            recIndicator.style.display = 'none';
+        }
+
+        // --- ระบบ WebSocket ---
+        ws.onopen = () => {
+            cloudDot.className = "status-dot online";
+        };
+
+        ws.onclose = () => {
+            cloudDot.className = "status-dot offline";
+            robotDot.className = "status-dot offline";
+        };
+
+        ws.onmessage = (event) => {
+            if (typeof event.data === "string") {
+                if (event.data === "ROBOT_PING") {
+                    robotDot.className = "status-dot online";
+                    clearTimeout(robotTimeout);
+                    robotTimeout = setTimeout(() => {
+                        robotDot.className = "status-dot offline";
+                    }, 5000);
+                }
+            } 
+            else if (event.data instanceof ArrayBuffer) {
+                if(event.data.byteLength > 5000) {
+                    const blob = new Blob([event.data], {type: 'image/jpeg'});
+                    const url = URL.createObjectURL(blob);
+                    img.src = url;
+                    
+                    img.onload = () => {
+                        if(isRecording) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        URL.revokeObjectURL(url);
+                    };
+                } else {
+                    playIncomingAudio(event.data);
+                }
+            }
+        };
+
+        function sendCmd(cmd, statusText) { 
+            if(ws.readyState === WebSocket.OPEN) {
+                ws.send(cmd); cmdStatus.innerText = statusText;
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if(e.key === 'w' || e.key === 'ArrowUp') sendCmd('F', 'เดินหน้า');
+            if(e.key === 's' || e.key === 'ArrowDown') sendCmd('B', 'ถอยหลัง');
+            if(e.key === 'a' || e.key === 'ArrowLeft') sendCmd('L', 'เลี้ยวซ้าย');
+            if(e.key === 'd' || e.key === 'ArrowRight') sendCmd('R', 'เลี้ยวขวา');
+            if(e.key === ' ') sendCmd('S', 'หยุด');
+        });
+        document.addEventListener('keyup', () => sendCmd('S', 'พักเครื่อง'));
+
+        // --- ระบบเสียง (Intercom) ---
+        let audioContextIn, processor, micStream;
+        const micBtn = document.getElementById('mic-btn');
+
+        function floatTo16BitPCM(input) {
+            let output = new Int16Array(input.length);
+            for (let i = 0; i < input.length; i++) {
+                let s = Math.max(-1, Math.min(1, input[i]));
+                output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return output.buffer;
+        }
+
+        micBtn.onmousedown = micBtn.ontouchstart = async (e) => {
+            e.preventDefault();
+            micBtn.style.background = "#fff"; 
+            micBtn.style.color = "#d68a20";
+            micBtn.innerHTML = "🔊 กำลังพูด...";
+            
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContextIn = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            const source = audioContextIn.createMediaStreamSource(micStream);
+            processor = audioContextIn.createScriptProcessor(2048, 1, 1);
+            
+            source.connect(processor); processor.connect(audioContextIn.destination);
+            processor.onaudioprocess = (e) => {
+                if(ws.readyState === WebSocket.OPEN) ws.send(floatTo16BitPCM(e.inputBuffer.getChannelData(0)));
+            };
+        };
+
+        micBtn.onmouseup = micBtn.ontouchend = (e) => {
+            e.preventDefault();
+            micBtn.style.background = "var(--btn-orange)"; 
+            micBtn.innerHTML = "🎙️ กดค้างเพื่อพูด";
+            if (processor) processor.disconnect();
+            if (micStream) micStream.getTracks().forEach(t => t.stop());
+        };
+
+        function playIncomingAudio(arrayBuffer) {
+            const int16Array = new Int16Array(arrayBuffer);
+            const float32Array = new Float32Array(int16Array.length);
+            for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 0x7FFF;
+            const audioBuffer = audioContextOut.createBuffer(1, float32Array.length, 16000);
+            audioBuffer.getChannelData(0).set(float32Array);
+            const source = audioContextOut.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContextOut.destination);
+            source.start();
+        }
+    </script>
+</body>
+</html>
