@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>น้องหุ่นยนต์ 🤖 Pro</title>
+    <title>น้องหุ่นยนต์ 🤖 Pro (Stable)</title>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -26,7 +26,10 @@
         .badge {
             background: var(--card); border-radius: 20px; padding: 6px 14px;
             font-size: 13px; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: all 0.2s;
         }
+        #mute-toggle { cursor: pointer; border: 1px solid transparent; }
+        #mute-toggle:active { transform: scale(0.95); }
         .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--gray); transition: background 0.3s; }
         .dot.online  { background: var(--green); box-shadow: 0 0 8px var(--green); }
         .dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); }
@@ -38,11 +41,9 @@
             display: flex; align-items: center; justify-content: center; border: 2px solid var(--card);
         }
         
-        /* เปลี่ยนเป็น Canvas ประหยัด RAM มือถือได้มหาศาล */
-        #video-canvas { width: 100%; height: 100%; object-fit: cover; display: none; transform: rotate(180deg); }
+        #video-stream { width: 100%; height: 100%; object-fit: cover; display: none; transform: rotate(180deg); }
         #no-signal { position: absolute; color: #888; font-size: 16px; text-align: center; font-weight: 600; }
         
-        /* เพิ่มสไตล์ปุ่มอัดวิดีโอ */
         .hud-overlay { position: absolute; top: 10px; right: 10px; background: rgba(255,50,50,0.9); color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; display: none; animation: blink 1s infinite; z-index: 10; }
         @keyframes blink { 50% { opacity: 0.5; } }
 
@@ -56,17 +57,17 @@
         .btn-stop:active, .btn-stop.pressed { box-shadow: 0 0px 0 var(--red-s); }
         .up { grid-column:2; } .left { grid-column:1; grid-row:2; } .stop { grid-column:2; grid-row:2; } .right { grid-column:3; grid-row:2; } .down { grid-column:2; grid-row:3; }
 
-        .action-panel { display: flex; gap: 12px; justify-content: center; width: 100%; max-width: 350px; margin: 0 auto; flex-wrap: wrap;}
+        .action-panel { display: flex; gap: 12px; justify-content: center; width: 100%; max-width: 350px; margin: 0 auto; flex-wrap: wrap; }
         .btn-action {
             flex: 1; padding: 16px 10px; border-radius: 16px; border: none; font-size: 15px; font-weight: 600; min-width: 140px;
             cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-family: inherit;
         }
         .btn-mic { background: var(--orange); color: #fff; box-shadow: 0 4px 0 #c47a00; }
         .btn-mic.active { background: var(--red); box-shadow: 0 0 15px var(--red); transform: scale(0.95); }
-        
-        /* เพิ่มสีของปุ่มบันทึกวิดีโอ */
         .btn-record { background: var(--purple); color: #fff; box-shadow: 0 4px 0 #7c6fd4; }
         .btn-record.active { background: var(--red); box-shadow: 0 0 15px var(--red); transform: scale(0.95); }
+        
+        #record-canvas { display: none; }
     </style>
 </head>
 <body>
@@ -75,12 +76,13 @@
     <div class="status-bar">
         <div class="badge"><div id="cloud-dot" class="dot offline"></div>Cloud</div>
         <div class="badge"><div id="robot-dot" class="dot offline"></div>Robot</div>
-        <div class="badge">🔊 <span id="audio-status">แตะจอ 1 ครั้งเพื่อเปิดเสียง</span></div>
+        <div class="badge" id="mute-toggle" style="background: var(--blue);">🔊 <span id="audio-status" style="color:#fff;">แตะจอเพื่อเปิดเสียง</span></div>
     </div>
     
     <div class="video-wrapper">
         <div id="no-signal">💤 รอสัญญาณภาพ...</div>
-        <canvas id="video-canvas"></canvas>
+        <img id="video-stream" alt="Video">
+        <canvas id="record-canvas"></canvas>
         <div id="rec-indicator" class="hud-overlay">🔴 REC</div>
     </div>
 
@@ -113,51 +115,76 @@ const MIC_GAIN    = 6.0;
 const cloudDot    = document.getElementById('cloud-dot');
 const robotDot    = document.getElementById('robot-dot');
 const audioStatus = document.getElementById('audio-status');
-const canvas      = document.getElementById('video-canvas');
-const ctx         = canvas.getContext('2d', { alpha: false }); // ปิด Alpha ให้ GPU วาดภาพไวขึ้น
+const muteToggle  = document.getElementById('mute-toggle');
+const imgEl       = document.getElementById('video-stream');
 const noSignal    = document.getElementById('no-signal');
 const micBtn      = document.getElementById('mic-btn');
-// ตัวแปรสำหรับบันทึกวิดีโอ
 const recordBtn   = document.getElementById('record-btn');
 const recIndicator= document.getElementById('rec-indicator');
 
-let ws, robotTimer;
+const canvas      = document.getElementById('record-canvas');
+const ctx2d       = canvas.getContext('2d', { alpha: false });
+
+let ws, robotTimer, reconnectTimer;
 const spkCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
 let nextPlayTime = 0;
+let isMuted = false;
 
-// ปลดล็อคเสียงอัตโนมัติ
+// ⚠️ ตัวแปรป้องกันภาพค้าง
+let isImageLoading = false;
+let imageLoadTimeout;
+
+muteToggle.addEventListener('click', () => {
+    isMuted = !isMuted;
+    if (isMuted) {
+        muteToggle.style.background = 'var(--red)';
+        muteToggle.innerHTML = `🔇 <span id="audio-status" style="color:#fff;">ปิดเสียงอยู่</span>`;
+    } else {
+        muteToggle.style.background = 'var(--blue)';
+        muteToggle.innerHTML = `🔊 <span id="audio-status" style="color:#fff;">พร้อมใช้งาน</span>`;
+        if (spkCtx.state === 'suspended') spkCtx.resume();
+    }
+});
+
 function unlockAudio() {
-    if (spkCtx.state === 'suspended') {
-        spkCtx.resume();
-        audioStatus.textContent = 'พร้อมใช้งาน';
+    if (!isMuted && spkCtx.state === 'suspended') {
+        spkCtx.resume().catch(()=>{});
+        if(!isMuted) document.getElementById('audio-status').textContent = 'พร้อมใช้งาน';
     }
 }
 document.addEventListener('pointerdown', unlockAudio, { once: true });
+document.addEventListener('touchstart', unlockAudio, { once: true });
 
 // ==========================================
-// ระบบอัดวิดีโอ (Video Recorder)
+// ระบบอัดวิดีโอ โหมดประหยัด CPU 
 // ==========================================
 let mediaRecorder = null, recChunks = [], isRecording = false;
-
 recordBtn.addEventListener('click', () => isRecording ? stopRec() : startRec());
 
 function startRec() {
     recChunks = [];
-    const stream = canvas.captureStream(15); 
-    const mime   = ['video/webm;codecs=vp9','video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+    canvas.width  = imgEl.naturalWidth  || 320;
+    canvas.height = imgEl.naturalHeight || 240;
     
-    mediaRecorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    const stream = canvas.captureStream(10); 
+    let mime = 'video/webm';
+    if (MediaRecorder.isTypeSupported('video/webm; codecs=vp8')) {
+        mime = 'video/webm; codecs=vp8';
+    }
+    
+    mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
     mediaRecorder.onstop = () => {
         const blob = new Blob(recChunks, { type: 'video/webm' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `Robot_${Date.now()}.webm`;
+        a.download = `Robot_Video_${Date.now()}.webm`;
         document.body.appendChild(a); 
         a.click(); 
         a.remove();
     };
-    mediaRecorder.start(200);
+    
+    mediaRecorder.start(1000); 
     isRecording = true;
     recordBtn.classList.add('active'); 
     recordBtn.innerHTML = '⏹️ หยุดบันทึก';
@@ -173,20 +200,32 @@ function stopRec() {
 }
 
 // ==========================================
-// WebSocket & Video Renderer (RAM Optimized)
+// WebSocket & Video Renderer 
 // ==========================================
-function connectWS() {
-    ws = new WebSocket(WS_URL);
-    ws.binaryType = 'arraybuffer'; // รับข้อมูลแบบดิบ
+let isConnecting = false;
 
-    ws.onopen = () => cloudDot.className = 'dot online';
+function connectWS() {
+    if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) return;
+    isConnecting = true;
+    
+    ws = new WebSocket(WS_URL);
+    ws.binaryType = 'arraybuffer'; 
+
+    ws.onopen = () => {
+        cloudDot.className = 'dot online';
+        isConnecting = false;
+        clearTimeout(reconnectTimer);
+    };
+    
     ws.onclose = () => {
         cloudDot.className = 'dot offline';
         robotDot.className = 'dot offline';
-        setTimeout(connectWS, 2000); // Auto reconnect 2 วิ
+        isConnecting = false;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectWS, 2000); 
     };
 
-    ws.onmessage = async (event) => {
+    ws.onmessage = (event) => {
         if (typeof event.data === 'string') {
             if (event.data === 'ROBOT_PING') {
                 robotDot.className = 'dot online';
@@ -197,22 +236,46 @@ function connectWS() {
         }
 
         const view = new DataView(event.data);
-        // ตรวจสอบ Header ภาพ JPEG (FF D8)
         if (view.byteLength >= 2 && view.getUint8(0) === 0xFF && view.getUint8(1) === 0xD8) {
+            
+            // ⚠️ 1. ถ้ารูปเก่ายังโหลดไม่เสร็จ ให้ทิ้งรูปใหม่ไปเลย ป้องกันคิวล้นจนเว็บแฮงค์
+            if (isImageLoading) return;
+            isImageLoading = true;
+
+            // ⚠️ 2. ตั้งเวลาเผื่อเหนียว ถ้าเบราว์เซอร์เอ๋อ 1 วิแล้วรูปยังไม่มา ให้ปลดล็อคคิวทันที
+            clearTimeout(imageLoadTimeout);
+            imageLoadTimeout = setTimeout(() => { isImageLoading = false; }, 1000);
+
             const blob = new Blob([event.data], { type: 'image/jpeg' });
-            try {
-                const bmp = await createImageBitmap(blob);
-                if (canvas.width !== bmp.width) {
-                    canvas.width = bmp.width;
-                    canvas.height = bmp.height;
-                }
-                ctx.drawImage(bmp, 0, 0);
-                bmp.close(); // คืน RAM ทันที
+            if (window.currentImgUrl) {
+                URL.revokeObjectURL(window.currentImgUrl);
+            }
+            window.currentImgUrl = URL.createObjectURL(blob);
+            
+            imgEl.onload = () => {
+                isImageLoading = false; // ปลดล็อคคิวเมื่อรูปแสดงผลสำเร็จ
+                clearTimeout(imageLoadTimeout);
+                
                 noSignal.style.display = 'none';
-                canvas.style.display = 'block';
-            } catch (e) { console.error("Video Render Error"); }
+                imgEl.style.display = 'block';
+                
+                if (isRecording) {
+                    if (canvas.width !== imgEl.naturalWidth) {
+                        canvas.width = imgEl.naturalWidth || 320;
+                        canvas.height = imgEl.naturalHeight || 240;
+                    }
+                    ctx2d.save();
+                    ctx2d.translate(canvas.width, canvas.height);
+                    ctx2d.rotate(Math.PI);
+                    ctx2d.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+                    ctx2d.restore();
+                }
+            };
+            
+            imgEl.onerror = () => { isImageLoading = false; }; // ปลดล็อคถ้าโหลดพลาด
+            imgEl.src = window.currentImgUrl;
+            
         } else {
-            // เล่นเสียง
             playAudioData(event.data);
         }
     };
@@ -224,7 +287,7 @@ function sendCmd(cmd) {
 }
 
 // ==========================================
-// Motor Controls (Anti-Ghost Touch)
+// Motor Controls
 // ==========================================
 document.querySelectorAll('.btn-ctrl').forEach(btn => {
     const cmd = btn.dataset.cmd;
@@ -250,35 +313,41 @@ document.querySelectorAll('.btn-ctrl').forEach(btn => {
 });
 
 // ==========================================
-// Audio Processing (Jitter Free)
+// Audio Processing
 // ==========================================
 function playAudioData(arrayBuffer) {
-    if (spkCtx.state === 'suspended') return;
+    if (isMuted || isTalking) return; 
 
-    const int16 = new Int16Array(arrayBuffer);
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-        float32[i] = int16[i] / 32768.0;
-    }
+    if (spkCtx.state === 'suspended') spkCtx.resume().catch(()=>{});
 
-    const audioBuf = spkCtx.createBuffer(1, float32.length, SAMPLE_RATE);
-    audioBuf.getChannelData(0).set(float32);
-    
-    const src = spkCtx.createBufferSource();
-    src.buffer = audioBuf;
-    src.connect(spkCtx.destination);
+    try {
+        const int16 = new Int16Array(arrayBuffer);
+        const float32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) {
+            float32[i] = int16[i] / 32768.0;
+        }
 
-    const now = spkCtx.currentTime;
-    if (nextPlayTime < now || nextPlayTime > now + 0.3) {
-        nextPlayTime = now + 0.05; 
-    }
-    
-    src.start(nextPlayTime);
-    nextPlayTime += audioBuf.duration;
+        const audioBuf = spkCtx.createBuffer(1, float32.length, SAMPLE_RATE);
+        audioBuf.getChannelData(0).set(float32);
+        
+        const src = spkCtx.createBufferSource();
+        src.buffer = audioBuf;
+        src.connect(spkCtx.destination);
 
-    audioStatus.textContent = '🔈 หุ่นกำลังพูด...';
-    clearTimeout(window._spkTimer);
-    window._spkTimer = setTimeout(() => audioStatus.textContent = 'พร้อมใช้งาน', 400);
+        const now = spkCtx.currentTime;
+        if (nextPlayTime < now || nextPlayTime > now + 0.5) {
+            nextPlayTime = now + 0.05; 
+        }
+        
+        src.start(nextPlayTime);
+        nextPlayTime += audioBuf.duration;
+
+        document.getElementById('audio-status').textContent = 'หุ่นกำลังพูด...';
+        clearTimeout(window._spkTimer);
+        window._spkTimer = setTimeout(() => {
+            if(!isMuted) document.getElementById('audio-status').textContent = 'พร้อมใช้งาน';
+        }, 400);
+    } catch(e) { } 
 }
 
 // ==========================================
