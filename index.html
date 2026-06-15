@@ -42,6 +42,10 @@
         #video-canvas { width: 100%; height: 100%; object-fit: cover; display: none; transform: rotate(180deg); }
         #no-signal { position: absolute; color: #888; font-size: 16px; text-align: center; font-weight: 600; }
         
+        /* เพิ่มสไตล์ปุ่มอัดวิดีโอ */
+        .hud-overlay { position: absolute; top: 10px; right: 10px; background: rgba(255,50,50,0.9); color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; display: none; animation: blink 1s infinite; z-index: 10; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+
         .d-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 280px; margin: 0 auto 20px auto; }
         .btn-ctrl {
             background: var(--blue); color: #fff; border: none; padding: 22px 0; border-radius: 16px; font-size: 22px;
@@ -52,13 +56,17 @@
         .btn-stop:active, .btn-stop.pressed { box-shadow: 0 0px 0 var(--red-s); }
         .up { grid-column:2; } .left { grid-column:1; grid-row:2; } .stop { grid-column:2; grid-row:2; } .right { grid-column:3; grid-row:2; } .down { grid-column:2; grid-row:3; }
 
-        .action-panel { display: flex; gap: 12px; justify-content: center; width: 100%; max-width: 280px; margin: 0 auto; }
+        .action-panel { display: flex; gap: 12px; justify-content: center; width: 100%; max-width: 350px; margin: 0 auto; flex-wrap: wrap;}
         .btn-action {
-            flex: 1; padding: 16px 10px; border-radius: 16px; border: none; font-size: 16px; font-weight: 600;
-            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s;
+            flex: 1; padding: 16px 10px; border-radius: 16px; border: none; font-size: 15px; font-weight: 600; min-width: 140px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-family: inherit;
         }
         .btn-mic { background: var(--orange); color: #fff; box-shadow: 0 4px 0 #c47a00; }
         .btn-mic.active { background: var(--red); box-shadow: 0 0 15px var(--red); transform: scale(0.95); }
+        
+        /* เพิ่มสีของปุ่มบันทึกวิดีโอ */
+        .btn-record { background: var(--purple); color: #fff; box-shadow: 0 4px 0 #7c6fd4; }
+        .btn-record.active { background: var(--red); box-shadow: 0 0 15px var(--red); transform: scale(0.95); }
     </style>
 </head>
 <body>
@@ -73,6 +81,7 @@
     <div class="video-wrapper">
         <div id="no-signal">💤 รอสัญญาณภาพ...</div>
         <canvas id="video-canvas"></canvas>
+        <div id="rec-indicator" class="hud-overlay">🔴 REC</div>
     </div>
 
     <div class="d-pad">
@@ -85,6 +94,7 @@
 
     <div class="action-panel">
         <button id="mic-btn" class="btn-action btn-mic">🎙️ กดค้างพูด</button>
+        <button id="record-btn" class="btn-action btn-record">📹 บันทึกวิดีโอ</button>
     </div>
 </div>
 
@@ -107,6 +117,9 @@ const canvas      = document.getElementById('video-canvas');
 const ctx         = canvas.getContext('2d', { alpha: false }); // ปิด Alpha ให้ GPU วาดภาพไวขึ้น
 const noSignal    = document.getElementById('no-signal');
 const micBtn      = document.getElementById('mic-btn');
+// ตัวแปรสำหรับบันทึกวิดีโอ
+const recordBtn   = document.getElementById('record-btn');
+const recIndicator= document.getElementById('rec-indicator');
 
 let ws, robotTimer;
 const spkCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
@@ -120,6 +133,44 @@ function unlockAudio() {
     }
 }
 document.addEventListener('pointerdown', unlockAudio, { once: true });
+
+// ==========================================
+// ระบบอัดวิดีโอ (Video Recorder)
+// ==========================================
+let mediaRecorder = null, recChunks = [], isRecording = false;
+
+recordBtn.addEventListener('click', () => isRecording ? stopRec() : startRec());
+
+function startRec() {
+    recChunks = [];
+    const stream = canvas.captureStream(15); 
+    const mime   = ['video/webm;codecs=vp9','video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+    
+    mediaRecorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+        const blob = new Blob(recChunks, { type: 'video/webm' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `Robot_${Date.now()}.webm`;
+        document.body.appendChild(a); 
+        a.click(); 
+        a.remove();
+    };
+    mediaRecorder.start(200);
+    isRecording = true;
+    recordBtn.classList.add('active'); 
+    recordBtn.innerHTML = '⏹️ หยุดบันทึก';
+    recIndicator.style.display = 'block';
+}
+
+function stopRec() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    isRecording = false;
+    recordBtn.classList.remove('active'); 
+    recordBtn.innerHTML = '📹 บันทึกวิดีโอ';
+    recIndicator.style.display = 'none';
+}
 
 // ==========================================
 // WebSocket & Video Renderer (RAM Optimized)
@@ -149,7 +200,6 @@ function connectWS() {
         // ตรวจสอบ Header ภาพ JPEG (FF D8)
         if (view.byteLength >= 2 && view.getUint8(0) === 0xFF && view.getUint8(1) === 0xD8) {
             const blob = new Blob([event.data], { type: 'image/jpeg' });
-            // เทคนิค createImageBitmap: วาดภาพลง Canvas โดยไม่สร้างไฟล์ค้างใน RAM
             try {
                 const bmp = await createImageBitmap(blob);
                 if (canvas.width !== bmp.width) {
@@ -219,7 +269,6 @@ function playAudioData(arrayBuffer) {
     src.connect(spkCtx.destination);
 
     const now = spkCtx.currentTime;
-    // Jitter Control: ถ้าคิวเสียงพัง ให้รีเซ็ตคิวเล่นใหม่ทันที
     if (nextPlayTime < now || nextPlayTime > now + 0.3) {
         nextPlayTime = now + 0.05; 
     }
