@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>น้องหุ่นยนต์ 🤖 Pro (Stable)</title>
+    <title>น้องหุ่นยนต์ 🤖 Pro (High-Perf)</title>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -130,7 +130,7 @@ const spkCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRa
 let nextPlayTime = 0;
 let isMuted = false;
 
-// ⚠️ ตัวแปรป้องกันภาพค้าง
+// ตัวแปรป้องกันภาพค้าง
 let isImageLoading = false;
 let imageLoadTimeout;
 
@@ -156,7 +156,7 @@ document.addEventListener('pointerdown', unlockAudio, { once: true });
 document.addEventListener('touchstart', unlockAudio, { once: true });
 
 // ==========================================
-// ระบบอัดวิดีโอ โหมดประหยัด CPU 
+// ระบบอัดวิดีโอ (โหมด High Performance)
 // ==========================================
 let mediaRecorder = null, recChunks = [], isRecording = false;
 recordBtn.addEventListener('click', () => isRecording ? stopRec() : startRec());
@@ -166,7 +166,9 @@ function startRec() {
     canvas.width  = imgEl.naturalWidth  || 320;
     canvas.height = imgEl.naturalHeight || 240;
     
-    const stream = canvas.captureStream(10); 
+    // 🚀 ปลดล็อคความเร็ววิดีโอเป็น 30 FPS ไปเลย!
+    const stream = canvas.captureStream(30); 
+    
     let mime = 'video/webm';
     if (MediaRecorder.isTypeSupported('video/webm; codecs=vp8')) {
         mime = 'video/webm; codecs=vp8';
@@ -184,7 +186,8 @@ function startRec() {
         a.remove();
     };
     
-    mediaRecorder.start(1000); 
+    // ใช้ขนาด Chunk ย่อยๆ เพื่อให้ประมวลผลทันใจไม่ต้องรอนาน
+    mediaRecorder.start(200); 
     isRecording = true;
     recordBtn.classList.add('active'); 
     recordBtn.innerHTML = '⏹️ หยุดบันทึก';
@@ -238,13 +241,13 @@ function connectWS() {
         const view = new DataView(event.data);
         if (view.byteLength >= 2 && view.getUint8(0) === 0xFF && view.getUint8(1) === 0xD8) {
             
-            // ⚠️ 1. ถ้ารูปเก่ายังโหลดไม่เสร็จ ให้ทิ้งรูปใหม่ไปเลย ป้องกันคิวล้นจนเว็บแฮงค์
+            // 🚀 Anti-Freeze: ถ้าเครื่องมัวแต่ทำอย่างอื่นอยู่ ให้ข้ามรูปนี้ไปเลย
             if (isImageLoading) return;
             isImageLoading = true;
 
-            // ⚠️ 2. ตั้งเวลาเผื่อเหนียว ถ้าเบราว์เซอร์เอ๋อ 1 วิแล้วรูปยังไม่มา ให้ปลดล็อคคิวทันที
+            // 🚀 ปรับ Timeout ให้ไวขึ้น! สำหรับอุปกรณ์ตัวท็อปอย่าง iPad (0.5 วินาที)
             clearTimeout(imageLoadTimeout);
-            imageLoadTimeout = setTimeout(() => { isImageLoading = false; }, 1000);
+            imageLoadTimeout = setTimeout(() => { isImageLoading = false; }, 500);
 
             const blob = new Blob([event.data], { type: 'image/jpeg' });
             if (window.currentImgUrl) {
@@ -253,12 +256,13 @@ function connectWS() {
             window.currentImgUrl = URL.createObjectURL(blob);
             
             imgEl.onload = () => {
-                isImageLoading = false; // ปลดล็อคคิวเมื่อรูปแสดงผลสำเร็จ
+                isImageLoading = false; 
                 clearTimeout(imageLoadTimeout);
                 
                 noSignal.style.display = 'none';
                 imgEl.style.display = 'block';
                 
+                // วาดลง Canvas สำหรับอัดวิดีโอ
                 if (isRecording) {
                     if (canvas.width !== imgEl.naturalWidth) {
                         canvas.width = imgEl.naturalWidth || 320;
@@ -272,7 +276,7 @@ function connectWS() {
                 }
             };
             
-            imgEl.onerror = () => { isImageLoading = false; }; // ปลดล็อคถ้าโหลดพลาด
+            imgEl.onerror = () => { isImageLoading = false; };
             imgEl.src = window.currentImgUrl;
             
         } else {
