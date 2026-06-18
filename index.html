@@ -125,7 +125,7 @@ const recIndicator= document.getElementById('rec-indicator');
 const canvas      = document.getElementById('record-canvas');
 const ctx2d       = canvas.getContext('2d', { alpha: false });
 
-let ws, robotTimer, reconnectTimer;
+let ws, robotTimer, reconnectTimer, heartbeatTimer; // ⚠️ เพิ่ม heartbeatTimer
 const spkCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
 let nextPlayTime = 0;
 let isMuted = false;
@@ -166,7 +166,6 @@ function startRec() {
     canvas.width  = imgEl.naturalWidth  || 320;
     canvas.height = imgEl.naturalHeight || 240;
     
-    // 🚀 ปลดล็อคความเร็ววิดีโอเป็น 30 FPS ไปเลย!
     const stream = canvas.captureStream(30); 
     
     let mime = 'video/webm';
@@ -186,7 +185,6 @@ function startRec() {
         a.remove();
     };
     
-    // ใช้ขนาด Chunk ย่อยๆ เพื่อให้ประมวลผลทันใจไม่ต้องรอนาน
     mediaRecorder.start(200); 
     isRecording = true;
     recordBtn.classList.add('active'); 
@@ -218,13 +216,30 @@ function connectWS() {
         cloudDot.className = 'dot online';
         isConnecting = false;
         clearTimeout(reconnectTimer);
+
+        // 🚀 1. ระบบ Heartbeat เลี้ยงการเชื่อมต่อ (แก้ปัญหาเซิร์ฟเวอร์เตะออก)
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send("WEBAPP_PING");
+            }
+        }, 10000); // ส่งกระตุ้นทุกๆ 10 วินาที
     };
     
+    ws.onerror = (error) => {
+        console.error("WebSocket Error:", error);
+        // Error จะทำให้ onclose ทำงานตามมาเอง
+    };
+
     ws.onclose = () => {
         cloudDot.className = 'dot offline';
         robotDot.className = 'dot offline';
         isConnecting = false;
+        
+        clearInterval(heartbeatTimer);
         clearTimeout(reconnectTimer);
+        
+        // 🚀 พยายามต่อใหม่แบบอัตโนมัติ ไม่ยอมแพ้
         reconnectTimer = setTimeout(connectWS, 2000); 
     };
 
@@ -241,11 +256,9 @@ function connectWS() {
         const view = new DataView(event.data);
         if (view.byteLength >= 2 && view.getUint8(0) === 0xFF && view.getUint8(1) === 0xD8) {
             
-            // 🚀 Anti-Freeze: ถ้าเครื่องมัวแต่ทำอย่างอื่นอยู่ ให้ข้ามรูปนี้ไปเลย
             if (isImageLoading) return;
             isImageLoading = true;
 
-            // 🚀 ปรับ Timeout ให้ไวขึ้น! สำหรับอุปกรณ์ตัวท็อปอย่าง iPad (0.5 วินาที)
             clearTimeout(imageLoadTimeout);
             imageLoadTimeout = setTimeout(() => { isImageLoading = false; }, 500);
 
@@ -262,7 +275,6 @@ function connectWS() {
                 noSignal.style.display = 'none';
                 imgEl.style.display = 'block';
                 
-                // วาดลง Canvas สำหรับอัดวิดีโอ
                 if (isRecording) {
                     if (canvas.width !== imgEl.naturalWidth) {
                         canvas.width = imgEl.naturalWidth || 320;
@@ -285,6 +297,16 @@ function connectWS() {
     };
 }
 connectWS();
+
+// 🚀 2. ระบบ Auto-Wake อัจฉริยะ (แก้ปัญหาเน็ตหลุดตอนสลับแอป/พับจอ)
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        // เมื่อผู้ใช้กลับมาที่หน้านี้ ให้เช็คเน็ตทันที ถ้าหลุดให้ต่อใหม่ไวแสง!
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            connectWS();
+        }
+    }
+});
 
 function sendCmd(cmd) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
