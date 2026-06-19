@@ -125,15 +125,14 @@ const recIndicator= document.getElementById('rec-indicator');
 const canvas      = document.getElementById('record-canvas');
 const ctx2d       = canvas.getContext('2d', { alpha: false });
 
-let ws, robotTimer, reconnectTimer, heartbeatTimer; // ⚠️ เพิ่ม heartbeatTimer
+let ws, robotTimer, reconnectTimer;
 const spkCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
 let nextPlayTime = 0;
 let isMuted = false;
-
-// ตัวแปรป้องกันภาพค้าง
 let isImageLoading = false;
 let imageLoadTimeout;
 
+// ระบบปุ่ม Mute ลำโพง
 muteToggle.addEventListener('click', () => {
     isMuted = !isMuted;
     if (isMuted) {
@@ -146,28 +145,28 @@ muteToggle.addEventListener('click', () => {
     }
 });
 
+// บังคับปลดล็อคเสียงเมื่อแตะจอ
 function unlockAudio() {
     if (!isMuted && spkCtx.state === 'suspended') {
-        spkCtx.resume().catch(()=>{});
-        if(!isMuted) document.getElementById('audio-status').textContent = 'พร้อมใช้งาน';
+        spkCtx.resume().then(() => {
+            audioStatus.textContent = 'พร้อมใช้งาน';
+        });
     }
 }
 document.addEventListener('pointerdown', unlockAudio, { once: true });
 document.addEventListener('touchstart', unlockAudio, { once: true });
+document.addEventListener('click', unlockAudio, { once: true });
 
 // ==========================================
-// ระบบอัดวิดีโอ (โหมด High Performance)
+// ระบบอัดวิดีโอ (30 FPS)
 // ==========================================
 let mediaRecorder = null, recChunks = [], isRecording = false;
+
 recordBtn.addEventListener('click', () => isRecording ? stopRec() : startRec());
 
 function startRec() {
     recChunks = [];
-    canvas.width  = imgEl.naturalWidth  || 320;
-    canvas.height = imgEl.naturalHeight || 240;
-    
     const stream = canvas.captureStream(30); 
-    
     let mime = 'video/webm';
     if (MediaRecorder.isTypeSupported('video/webm; codecs=vp8')) {
         mime = 'video/webm; codecs=vp8';
@@ -201,7 +200,7 @@ function stopRec() {
 }
 
 // ==========================================
-// WebSocket & Video Renderer 
+// WebSocket & Video Renderer
 // ==========================================
 let isConnecting = false;
 
@@ -216,34 +215,17 @@ function connectWS() {
         cloudDot.className = 'dot online';
         isConnecting = false;
         clearTimeout(reconnectTimer);
-
-        // 🚀 1. ระบบ Heartbeat เลี้ยงการเชื่อมต่อ (แก้ปัญหาเซิร์ฟเวอร์เตะออก)
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send("WEBAPP_PING");
-            }
-        }, 10000); // ส่งกระตุ้นทุกๆ 10 วินาที
     };
     
-    ws.onerror = (error) => {
-        console.error("WebSocket Error:", error);
-        // Error จะทำให้ onclose ทำงานตามมาเอง
-    };
-
     ws.onclose = () => {
         cloudDot.className = 'dot offline';
         robotDot.className = 'dot offline';
         isConnecting = false;
-        
-        clearInterval(heartbeatTimer);
         clearTimeout(reconnectTimer);
-        
-        // 🚀 พยายามต่อใหม่แบบอัตโนมัติ ไม่ยอมแพ้
         reconnectTimer = setTimeout(connectWS, 2000); 
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = async (event) => {
         if (typeof event.data === 'string') {
             if (event.data === 'ROBOT_PING') {
                 robotDot.className = 'dot online';
@@ -263,15 +245,12 @@ function connectWS() {
             imageLoadTimeout = setTimeout(() => { isImageLoading = false; }, 500);
 
             const blob = new Blob([event.data], { type: 'image/jpeg' });
-            if (window.currentImgUrl) {
-                URL.revokeObjectURL(window.currentImgUrl);
-            }
+            if (window.currentImgUrl) URL.revokeObjectURL(window.currentImgUrl);
             window.currentImgUrl = URL.createObjectURL(blob);
             
             imgEl.onload = () => {
                 isImageLoading = false; 
                 clearTimeout(imageLoadTimeout);
-                
                 noSignal.style.display = 'none';
                 imgEl.style.display = 'block';
                 
@@ -298,23 +277,15 @@ function connectWS() {
 }
 connectWS();
 
-// 🚀 2. ระบบ Auto-Wake อัจฉริยะ (แก้ปัญหาเน็ตหลุดตอนสลับแอป/พับจอ)
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-        // เมื่อผู้ใช้กลับมาที่หน้านี้ ให้เช็คเน็ตทันที ถ้าหลุดให้ต่อใหม่ไวแสง!
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            connectWS();
-        }
-    }
-});
-
 function sendCmd(cmd) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
 }
 
 // ==========================================
-// Motor Controls
+// 🚀 Motor Controls (Auto-Fire & Anti-Ghost Touch)
 // ==========================================
+let cmdInterval = null; // ตัวแปรเก็บรอบการยิงคำสั่งซ้ำ
+
 document.querySelectorAll('.btn-ctrl').forEach(btn => {
     const cmd = btn.dataset.cmd;
     let isActive = false;
@@ -322,12 +293,29 @@ document.querySelectorAll('.btn-ctrl').forEach(btn => {
     const startCmd = (e) => {
         e.preventDefault();
         if(isActive) return; isActive = true;
-        btn.classList.add('pressed'); sendCmd(cmd);
+        btn.classList.add('pressed'); 
+        
+        // 1. ส่งคำสั่งทันทีที่จิ้ม
+        sendCmd(cmd); 
+        
+        // 2. ถ้ากดค้าง ให้ส่งย้ำทุกๆ 300ms เพื่อบอกหุ่นว่าเรายังคุมอยู่
+        // ป้องกันระบบ Failsafe ในหุ่นยนต์ตัดการทำงาน
+        clearInterval(cmdInterval);
+        if (cmd !== 'S') {
+            cmdInterval = setInterval(() => sendCmd(cmd), 300);
+        }
     };
+    
     const stopCmd = (e) => {
         e.preventDefault();
         if(!isActive) return; isActive = false;
-        btn.classList.remove('pressed'); if (cmd !== 'S') sendCmd('S');
+        btn.classList.remove('pressed'); 
+        
+        // 1. ยกเลิกการส่งคำสั่งย้ำ
+        clearInterval(cmdInterval); 
+        
+        // 2. สั่งหยุดรถ
+        if (cmd !== 'S') sendCmd('S');
     };
 
     btn.addEventListener('touchstart', startCmd, { passive: false });
